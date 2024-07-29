@@ -1,6 +1,6 @@
 # Swift Feeds
 
-Swift Feeds is fork of FeedKit focused on supporting later versions of Apple's devices.
+Swift Feeds is based on [FeedKit](https://github.com/nmdias/FeedKit). It's focused on simplicity, speed and support for later versions of Apple's devices.
 
 ## Features
 
@@ -25,60 +25,20 @@ Swift Feeds is fork of FeedKit focused on supporting later versions of Apple's d
 
 ## Usage
 
-Build a URL pointing to an RSS, Atom or JSON Feed.
+Build a URL pointing to a RSS, Atom or JSON Feed.
 ```swift
 let feedURL = URL(string: "http://images.apple.com/main/rss/hotnews/hotnews.rss")!
 ```
 
-Get an instance of `FeedParser`
+And then get an instance of a `RSSFeed`, `AtomFeed`, or `JSONFeed` struct asynchronously.
 ```swift
-let parser = FeedParser(URL: feedURL) // or FeedParser(data: data) or FeedParser(xmlStream: stream)
-```
+let feed = try await AtomFeed(URL: feedURL) 
+```   
 
-Then call `parse` or `parseAsync` to start parsing the feed...
-
-> A **common scenario** in UI environments would be parsing a feed **asynchronously** from a user initiated action, such as the touch of a button. e.g.
-
+Alternatively, you can also parse synchronously if the URL is a local file or use a Data object.
 ```swift
-// Parse asynchronously, not to block the UI.
-parser.parseAsync(queue: DispatchQueue.global(qos: .userInitiated)) { (result) in
-    // Do your thing, then back to the Main thread
-    DispatchQueue.main.async {
-        // ..and update the UI
-    }
-}
-```     
-
-Remember, you are responsible to manually bring the result closure to whichever queue is apropriate. Usually to the Main thread, for UI apps, by calling `DispatchQueue.main.async` .
-
-Alternatively, you can also parse synchronously.
-
-```swift
-let result = parser.parse()
-```
-
-## Parse Result
-
-Swift Feeds adopts Swift 5 Result type, as `Result<Feed, ParserError>`, and as such, if parsing succeeds you should now have a `Strongly Typed Model` of an `RSS`, `Atom` or `JSON Feed`, within the `Feed` enum:
-
-```swift
-switch result {
-case .success(let feed):
-    
-    // Grab the parsed feed directly as an optional rss, atom or json feed object
-    feed.rssFeed
-    
-    // Or alternatively...
-    switch feed {
-    case let .atom(feed):       // Atom Syndication Format Feed Model
-    case let .rss(feed):        // Really Simple Syndication Feed Model
-    case let .json(feed):       // JSON Feed Model
-    }
-    
-case .failure(let error):
-    print(error)
-}
-```
+let parser = try AtomFeed(URL: feedURL) // or AtomFeed(data: data) 
+```   
 
 ## Model Preview
 

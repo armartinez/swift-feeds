@@ -164,13 +164,14 @@ public struct MediaNamespace {
     /// Optional element to specify the rights information of a media object.
     public var mediaRights: MediaRights?
     
-    /// Optional element to specify various scenes within a media object. It can 
+    // TODO: Support mediascene tag or remove it since childen tags do not include namespace.
+    /// Optional element to specify various scenes within a media object. It can
     /// have multiple child <media:scene> elements, where each <media:scene> 
     /// element contains information about a particular scene. <media:scene> has 
     /// the optional sub-elements <sceneTitle>, <sceneDescription>, 
     /// <sceneStartTime> and <sceneEndTime>, which contains title, description, 
     /// start and end time of a particular scene in the media, respectively.
-    public var mediaScenes: MediaScenes?
+    // public var mediaScenes: MediaScenes?
     
     public init() { }
 
@@ -207,8 +208,8 @@ extension MediaNamespace: Equatable {
             lhs.mediaSubTitle == rhs.mediaSubTitle &&
             lhs.mediaPeerLink == rhs.mediaPeerLink &&
             lhs.mediaLocation == rhs.mediaLocation &&
-            lhs.mediaRights == rhs.mediaRights &&
-            lhs.mediaScenes == rhs.mediaScenes
+            lhs.mediaRights == rhs.mediaRights
+            // lhs.mediaScenes == rhs.mediaScenes
     }
     
 }
@@ -244,7 +245,7 @@ extension MediaNamespace: Codable {
         case peerLink
         case location
         case rights
-        case scenes
+        // case scenes
     }
     
     public func encode(to encoder: Encoder) throws {
@@ -274,7 +275,7 @@ extension MediaNamespace: Codable {
         try container.encode(mediaPeerLink, forKey: .peerLink)
         try container.encode(mediaLocation, forKey: .location)
         try container.encode(mediaRights, forKey: .rights)
-        try container.encode(mediaScenes, forKey: .scenes)
+        // try container.encode(mediaScenes, forKey: .scenes)
     }
     
     public init(from decoder: Decoder) throws {
@@ -305,6 +306,6 @@ extension MediaNamespace: Codable {
         mediaPeerLink = try container.decodeIfPresent(MediaPeerLink.self, forKey: .peerLink)
         mediaLocation = try container.decodeIfPresent(MediaLocation.self, forKey: .location)
         mediaRights = try container.decodeIfPresent(MediaRights.self, forKey: .rights)
-        mediaScenes = try container.decodeIfPresent(MediaScenes.self, forKey: .scenes)
+        // mediaScenes = try container.decodeIfPresent(MediaScenes.self, forKey: .scenes)
     }
 }
