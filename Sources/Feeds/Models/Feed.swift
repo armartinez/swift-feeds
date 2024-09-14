@@ -41,31 +41,18 @@ extension Feed {
     public init(URL: URL) async throws {
         var data: Data?
     
-        let (result, response) = try await URLSession.shared.data(from: URL)
-        
-        if let httpResponse = response as? HTTPURLResponse {
-            if httpResponse.statusCode == 200 {
-                data = result
-            } else {
-                throw FeedError.internalError(reason: "Unexpected HTTP Response: "+httpResponse.description)
-            }
-        }
-        
-        if let data = data {
-            try self.init(data: data)
-        } else {
-            throw FeedError.internalError(reason: "can't initialize")
-        }
-    }
-    
-    /// Initializes the feed with the content referenced by the given URL.
-    ///
-    /// - Parameter URL: URL whose contents are read to produce the feed data
-    public init(URL: URL) throws {
-        var data: Data?
-        
         if URL.isFileURL {
             data = try Data(contentsOf: URL)
+        } else {
+            let (result, response) = try await URLSession.shared.data(from: URL)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 200 {
+                    data = result
+                } else {
+                    throw FeedError.internalError(reason: "Unexpected HTTP Response: "+httpResponse.description)
+                }
+            }
         }
         
         if let data = data {

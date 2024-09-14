@@ -24,8 +24,8 @@ public struct RSSFeed: Feed {
     ///
     /// - Parameter data: XML or JSON data
     public init(data: Data) throws {
-        let xml = try XMLDocument(data: data, options: .documentValidate)
-        let decoder = XMLDecoder(from: xml.rootElement()!, options: .init())
+        let xml = try XMLReader().read(with: data)
+        let decoder = XMLDecoder(from: xml, options: .init())
         
         try self.init(from: decoder)
     }
