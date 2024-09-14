@@ -27,128 +27,61 @@ fileprivate struct _XMLKey: CodingKey {
 }
 
 struct XMLDecoder {
-    /// The decoder's storage.
-    var element: XMLElement
-
-    /// The decoder's current name
-    fileprivate let elementName: String?
+    /// The root element
+    fileprivate let element: XMLTag
     
-    /// The decoder's current namespace
-    fileprivate let namespace: XMLNode?
+    /// The root element
+    fileprivate let namespace: String?
     
     /// Options set on the top-level decoder.
     fileprivate let options: DecoderOptions
     
     /// The path to the current point in encoding.
     fileprivate(set) public var codingPath: [CodingKey]
-
+    
     /// Contextual user-provided information for use during encoding.
     public var userInfo: [CodingUserInfoKey : Any]
     
     /// Initializes `self` with the given top-level container and options.
-    init(from xml: XMLElement, at codingPath: [CodingKey] = [], elementName: String = "", namespace: XMLNode? = nil, options: DecoderOptions) {
-        self.element = xml
-        self.elementName = elementName
+    init(from element: XMLTag, with namespace: String? = nil, at codingPath: [CodingKey] = [], options: DecoderOptions) {
+        self.element = element
         self.namespace = namespace
         self.codingPath = codingPath
         self.options = options
         self.userInfo = [:]
-    }
-    
-    func qualifiedName(forNode node: XMLNode) -> String? {
-        guard let name = node.name else {
-            return nil
-        }
-        
-        return qualifiedName(forKey: name)
-    }
-    
-    func qualifiedName(forKey key: String) -> String {
-        guard let namespace = self.namespace?.localName else {
-            return key
-        }
-
-        return "\(namespace):\(key)"
     }
 }
 
 // MARK: - Decoder Methods
 
 extension XMLDecoder: Decoder {
-    func container<Key>(keyedBy type: Key.Type) throws -> KeyedDecodingContainer<Key> where Key : CodingKey {
-        switch self.element.kind {
-        case .element, .document:
-            let nodes = nodes(of: element)
-            let container = KeyedContainer<Key>(decoder: self, codingPath: codingPath, dictionary: nodes)
-            return KeyedDecodingContainer(container)
-        case .invalid:
-            throw DecodingError.valueNotFound([String: XMLNode].self, DecodingError.Context(
-                codingPath: self.codingPath,
-                debugDescription: "Cannot get keyed decoding container -- found invalid value instead"
-            ))
-        default:
-            throw DecodingError.typeMismatch([String: XMLNode].self, DecodingError.Context(
-                codingPath: self.codingPath,
-                debugDescription: "Expected to decode \([String: XMLNode].self) but found \(self.element.kind) instead."
-            ))
-        }
-    }
-
-    func unkeyedContainer() throws -> UnkeyedDecodingContainer {
-        switch self.element.kind {
-        case .element:
-            guard let elementName = self.elementName else {
-                throw DecodingError.valueNotFound([String: XMLNode].self, DecodingError.Context(
-                    codingPath: self.codingPath,
-                    debugDescription: "Cannot get keyed decoding container -- found invalid value instead"
-                ))
-            }
-            let elements = element.elements(forName: elementName)
-            return UnkeyedContainer(decoder: self, array: elements)
-        case .invalid:
-            throw DecodingError.valueNotFound([String: XMLNode].self, DecodingError.Context(
-                codingPath: self.codingPath,
-                debugDescription: "Cannot get keyed decoding container -- found invalid value instead"
-            ))
-        default:
-            throw DecodingError.typeMismatch([String: XMLNode].self, DecodingError.Context(
-                codingPath: self.codingPath,
-                debugDescription: "Expected to decode \([String: XMLNode].self) but found \(self.element.kind) instead."
-            ))
-        }
-    }
-
-    func singleValueContainer() throws -> SingleValueDecodingContainer {
-        return SingleValueContainer(decoder: self, codingPath: codingPath, node: element)
+    @usableFromInline func container<Key>(keyedBy type: Key.Type) throws -> KeyedDecodingContainer<Key> where Key : CodingKey {
+        let container = KeyedContainer<Key>(decoder: self, codingPath: self.codingPath, element: self.element, namespace: self.namespace)
+        return KeyedDecodingContainer(container)
     }
     
-    func nodes(of element: XMLElement) -> [String:XMLNode] {
-        var nodes = [String:XMLNode]()
+    @usableFromInline func unkeyedContainer() throws -> UnkeyedDecodingContainer {
+        var array: [XMLTag]?
         
-        for attribute in element.attributes ?? [] {
-            if let name = attribute.name {
-                nodes[name] = attribute
-            }
+        if let namespace = self.namespace {
+            array = self.element.getChildren(withPrefix: namespace)
+        } else if let name = self.codingPath.last?.stringValue {
+            array = self.element.getChildren(withName: name)
         }
-
-        let children = self.element.children?.filter({ $0.prefix == namespace?.localName ?? "" || $0.prefix == nil })
         
-        for child in children ?? [] {
-            switch child.kind {
-            case .element:
-                if let name = child.name, nodes[name] == nil {
-                    nodes[name] = child
-                }
-            case .text:
-                if let name = element.name {
-                    nodes[name] = child
-                }
-            default:
-                break
-            }
+        guard let array = array else {
+            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
         }
-
-        return nodes
+        
+        return UnkeyedContainer(decoder: self, codingPath: self.codingPath, array: array)
+    }
+    
+    @usableFromInline func singleValueContainer() throws -> SingleValueDecodingContainer {
+        guard let value = element.value else {
+            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
+        }
+        
+        return SingleValueContainer(decoder: self, codingPath: codingPath, stringValue: value)
     }
     
     func unwrap<T: Decodable>(as type: T.Type) throws -> T {
@@ -161,85 +94,95 @@ extension XMLDecoder: Decoder {
         if type == URL.self {
             return try self.unwrapURL() as! T
         }
+        if type == Decimal.self {
+            return try self.unwrapDecimal() as! T
+        }
         
         return try type.init(from: self)
     }
     
-    func unwrapDate() throws -> Date {
-        guard let value = self.element.stringValue else {
-            throw DecodingError.valueNotFound(Date.self, DecodingError.Context(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
+    private func unwrapDate() throws -> Date {
+        guard let value = self.element.value else {
+            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
         }
         
         switch options.dateDecodingStrategy {
-        case .deferredToDate:
-            return try Date(from: self)
         case .secondsSince1970:
-            let container = SingleValueContainer(decoder: self, codingPath: self.codingPath, node: self.element)
+            let container = SingleValueContainer(decoder: self, codingPath: self.codingPath, stringValue: value)
             let double = try container.decode(Double.self)
             return Date(timeIntervalSince1970: double)
         case .millisecondsSince1970:
-            let container = SingleValueContainer(decoder: self, codingPath: self.codingPath, node: self.element)
+            let container = SingleValueContainer(decoder: self, codingPath: self.codingPath, stringValue: value)
             let double = try container.decode(Double.self)
             return Date(timeIntervalSince1970: double / 1000.0)
         case .iso8601:
             if #available(macOS 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *) {
-                let container = SingleValueContainer(decoder: self, codingPath: self.codingPath, node: self.element)
+                let container = SingleValueContainer(decoder: self, codingPath: self.codingPath, stringValue: value)
                 let string = try container.decode(String.self)
                 guard let date = ISO8601DateFormatter().date(from: string) else {
-                    throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: self.codingPath, debugDescription: "Expected date string to be ISO8601-formatted."))
+                    throw DecodingError.dataCorrupted(.init(codingPath: self.codingPath, debugDescription: "Expected date string to be ISO8601-formatted."))
                 }
                 return date
             } else {
                 fatalError("ISO8601DateFormatter is unavailable on this platform.")
             }        case .formatted(let customDateFormatter):
             guard let value = customDateFormatter.date(from: value) else {
-                throw DecodingError.valueNotFound(Date.self, DecodingError.Context(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
+                throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
             }
             return value
         case .custom(let closure):
             return try closure(self)
+        default:
+            return try Date(from: self)
         }
+        
     }
-
-    func unwrapData() throws -> Data {
-        guard let value = self.element.stringValue else {
-            throw DecodingError.valueNotFound(Date.self, DecodingError.Context(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
+    
+    private func unwrapData() throws -> Data {
+        guard let value = self.element.value else {
+            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
         }
         
         switch options.dataDecodingStrategy {
-        case .deferredToData:
-            return try Data(from: self)
         case .base64:
             guard let value = Data(base64Encoded: value) else {
-                throw DecodingError.valueNotFound(Data.self, DecodingError.Context(codingPath: self.codingPath, debugDescription: "Could not decode \(Data.self)."))
+                throw DecodingError.valueNotFound(Data.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Data.self)."))
             }
             return value
-            /*case .hex:
-             guard let value = Data(hexEncoded: string) else {
-             throw DecodingError.valueNotFound(type, DecodingError.Context(codingPath: self.codingPath, debugDescription: "Could not decode \(type)."))
-             }
-             return value*/
         case .custom(let closure):
             return try closure(self)
+        default:
+            return try Data(from: self)
         }
     }
     
-    func unwrapURL() throws -> URL {
-        guard let value = self.element.stringValue, let url = URL(string: value) else {
-            throw DecodingError.valueNotFound(Date.self, DecodingError.Context(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
+    private func unwrapURL() throws -> URL {
+        guard let value = self.element.value, let url = URL(string: value) else {
+            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(URL.self)."))
         }
+        
         return url
     }
     
-    func unwrapFloatingPoint<T: LosslessStringConvertible & BinaryFloatingPoint>(
-        from value: XMLNode,
+    private func unwrapDecimal() throws -> Decimal {
+        guard let numberString = self.element.value else {
+            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(URL.self)."))
+        }
+        
+        guard let decimal = Decimal(string: numberString) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: self.codingPath,
+                debugDescription: "Parsed JSON number <\(numberString)> does not fit in \(Decimal.self)."))
+        }
+        
+        return decimal
+    }
+    
+    private func unwrapFloatingPoint<T: LosslessStringConvertible & BinaryFloatingPoint>(
+        from number: String,
         for additionalKey: CodingKey? = nil,
         as type: T.Type
     ) throws -> T {
-        guard let number = value.stringValue else {
-            throw DecodingError.valueNotFound(Date.self, DecodingError.Context(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
-        }
-        
         guard let floatingPoint = T(number), floatingPoint.isFinite else {
             var path = self.codingPath
             if let additionalKey = additionalKey {
@@ -247,7 +190,7 @@ extension XMLDecoder: Decoder {
             }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: path,
-                debugDescription: "Parsed JSON number <\(value)> does not fit in \(T.self)."))
+                debugDescription: "Parsed JSON number <\(number)> does not fit in \(T.self)."))
         }
         
         var path = self.codingPath
@@ -258,20 +201,20 @@ extension XMLDecoder: Decoder {
         return floatingPoint
     }
     
-    func unwrapFixedWidthInteger<T: FixedWidthInteger>(
-        from value: XMLNode,
+    private func unwrapFixedWidthInteger<T: FixedWidthInteger>(
+        from number: String,
         for additionalKey: CodingKey? = nil,
         as type: T.Type
     ) throws -> T {
-        guard let number = value.stringValue else {
-            throw DecodingError.valueNotFound(String.self, DecodingError.Context(codingPath: self.codingPath, debugDescription: "Could not decode \(String.self)."))
+        guard !number.isEmpty else {
+            throw DecodingError.valueNotFound(type, .init(codingPath: self.codingPath, debugDescription: "Empty string"))
         }
         
         // this is the fast pass. Number directly convertible to Integer
         if let integer = T(number) {
             return integer
         }
- 
+        
         // this is the really slow path... If the fast path has failed. For example for "34.0" as
         // an integer, we try to go through NSNumber
         if let nsNumber = NSNumber.fromJSONNumber(number) {
@@ -312,7 +255,7 @@ extension XMLDecoder: Decoder {
             path.append(additionalKey)
         }
         
-        throw DecodingError.valueNotFound(type, DecodingError.Context(codingPath: self.codingPath, debugDescription: "Could not decode \(type)."))
+        throw DecodingError.valueNotFound(type, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(type)."))
     }
 }
 
@@ -321,31 +264,39 @@ extension XMLDecoder: Decoder {
 extension XMLDecoder {
     struct SingleValueContainer: SingleValueDecodingContainer {
         let decoder: XMLDecoder
-        let value: XMLNode
+        let stringValue: String?
         let codingPath: [CodingKey]
         
-        init(decoder: XMLDecoder, codingPath: [CodingKey], node: XMLNode) {
+        init(decoder: XMLDecoder, codingPath: [CodingKey], stringValue: String?) {
             self.decoder = decoder
             self.codingPath = codingPath
-            self.value = node
+            self.stringValue = stringValue
         }
         
         func decodeNil() -> Bool {
-            fatalError()
+            self.stringValue == nil
         }
         
         func decode(_ type: Bool.Type) throws -> Bool {
-            guard let string = value.stringValue, let result = Bool(string) else {
-                throw DecodingError.valueNotFound(String.self, DecodingError.Context(
+            guard let string = stringValue, let result = Bool(string) else {
+                throw DecodingError.valueNotFound(String.self, .init(
                     codingPath: self.codingPath,
                     debugDescription: "Could not decode \(String.self).")
                 )
             }
+            
             return result
         }
         
         func decode(_ type: String.Type) throws -> String {
-            return value.stringValue ?? ""
+            guard let string = stringValue else {
+                throw DecodingError.valueNotFound(String.self, .init(
+                    codingPath: self.codingPath,
+                    debugDescription: "Could not decode \(String.self).")
+                )
+            }
+            
+            return string
         }
         
         func decode(_ type: Double.Type) throws -> Double {
@@ -401,11 +352,17 @@ extension XMLDecoder {
         }
         
         @inline(__always) private func decodeFixedWidthInteger<T: FixedWidthInteger>() throws -> T {
-            try self.decoder.unwrapFixedWidthInteger(from: self.value, as: T.self)
+            guard let value = self.stringValue else {
+                throw DecodingError.valueNotFound(String.self, .init(codingPath: self.decoder.codingPath, debugDescription: "Could not decode."))
+            }
+            return try self.decoder.unwrapFixedWidthInteger(from: value, as: T.self)
         }
         
         @inline(__always) private func decodeFloatingPoint<T: LosslessStringConvertible & BinaryFloatingPoint>() throws -> T {
-            try self.decoder.unwrapFloatingPoint(from: self.value, as: T.self)
+            guard let value = self.stringValue else {
+                throw DecodingError.valueNotFound(String.self, .init(codingPath: self.decoder.codingPath, debugDescription: "Could not decode."))
+            }
+            return try self.decoder.unwrapFloatingPoint(from: value, as: T.self)
         }
     }
 }
@@ -416,15 +373,15 @@ extension XMLDecoder {
     struct KeyedContainer<K: CodingKey>: KeyedDecodingContainerProtocol {
         /// A reference to the encoder we're reading from.
         private let decoder: XMLDecoder
-
-        /// A reference to the root element namespaces
-        private let namespaces: [String: XMLNode]?
         
         /// A reference to the nodes we're reading from.
-        private var elements: [String: XMLNode]
-
+        private let attributes: [String: String]
+        
         /// A reference to the nodes we're reading from.
-        private var attributes: [String: XMLNode]
+        private let elements: [String: XMLTag]
+        
+        /// A reference to all supported namespaces
+        private let namespaces: Set<String>
         
         /// The path of coding keys taken to get to this point in decoding.
         private(set) public var codingPath: [CodingKey]
@@ -432,76 +389,51 @@ extension XMLDecoder {
         // MARK: - Initialization
 
         /// Initializes `self` with the given references.
-        fileprivate init(decoder: XMLDecoder, codingPath: [CodingKey], dictionary: [String: XMLNode]) {
+        fileprivate init(decoder: XMLDecoder, codingPath: [CodingKey], element: XMLTag, namespace: String? = nil) {
             self.decoder = decoder
             self.codingPath = codingPath
-            self.elements = dictionary.filter({ $0.value.kind == .element || $0.value.kind == .text })
-            self.attributes = dictionary.filter({ $0.value.kind == .attribute })
-            self.namespaces = decoder.element.rootDocument?.rootElement()?.namespaces?.reduce(into: [String: XMLNode]()) {
-                if let name = $1.name {
-                    $0[name] = $1
-                }
+            self.attributes = element.attributes
+            self.namespaces = element.getNamespaces() ?? []
+            
+            if let namespace = namespace {
+                self.elements = element.getChildrenDictionary(withPrefix: namespace) ?? [:]
+            } else {
+                self.elements = element.getChildrenDictionary() ?? [:]
             }
         }
-
+        
         // MARK: KeyedDecodingContainerProtocol Implementation
-
+        
         var allKeys: [K] {
+            self.attributes.keys.compactMap { K(stringValue: $0) } +
             self.elements.keys.compactMap { K(stringValue: $0) } +
-            self.attributes.keys.compactMap { K(stringValue: $0) }
+            self.namespaces.compactMap { K(stringValue: $0)}
         }
-
+        
         func contains(_ key: K) -> Bool {
-            let qualifiedKey = decoder.qualifiedName(forKey: key.stringValue)
-            return attributes[key.stringValue] != nil || elements[qualifiedKey] != nil || namespaces?[key.stringValue] != nil
+            return self.elements[key.stringValue] != nil ||
+                   self.attributes[key.stringValue] != nil ||
+                   self.namespaces.contains(key.stringValue) ||
+                   self.decoder.element.name == key.stringValue
         }
-
-        func node(forKey key: K) -> XMLNode? {
-            let qualifiedKey = decoder.qualifiedName(forKey: key.stringValue)
-            if let node = attributes[key.stringValue] {
-                return node
-            } else if let node = elements[qualifiedKey] {
-                return node
-            } else if let node = namespaces?[key.stringValue] {
-                return node
-            }
-
-            return nil
-        }
-
+        
         func decodeNil(forKey key: K) throws -> Bool {
-            guard let node = node(forKey: key) else {
-                return true
+            let value = try getValue(forKey: key)
+            return value == ""
+        }
+        
+        func decode(_ type: Bool.Type, forKey key: K) throws -> Bool {
+            let value = try getValue(forKey: key)
+            
+            guard let bool = Bool(value) else {
+                throw DecodingError.valueNotFound(type, .init(codingPath: self.decoder.codingPath, debugDescription: "No value associated with key \(key.stringValue)."))
             }
             
-            switch node.kind {
-            case .element:
-                guard let element = node as? XMLElement else {
-                    throw DecodingError.valueNotFound([String: XMLNode].self, DecodingError.Context(
-                        codingPath: self.codingPath,
-                        debugDescription: "Cannot get keyed decoding container -- found invalid value instead"
-                    ))
-                }
-                return element.stringValue?.isEmpty ?? true && element.attributes?.isEmpty ?? true
-            case .attribute, .text, .namespace:
-                return node.stringValue?.isEmpty ?? true
-            default:
-                return true
-            }
+            return bool
         }
-
-        func decode(_ type: Bool.Type, forKey key: K) throws -> Bool {
-            guard let node = node(forKey: key), let string = node.stringValue, let value = Bool(string) else {
-                throw DecodingError.valueNotFound(type, DecodingError.Context(codingPath: self.decoder.codingPath, debugDescription: "No value associated with key \(key.stringValue)."))
-            }
-            return value
-        }
-
+        
         func decode(_ type: String.Type, forKey key: K) throws -> String {
-            guard let node = node(forKey: key) else {
-                throw DecodingError.valueNotFound(type, DecodingError.Context(codingPath: self.decoder.codingPath, debugDescription: "No value associated with key \(key.stringValue)."))
-            }
-            return node.stringValue ?? ""
+            return try getValue(forKey: key)
         }
         
         func decode(_: Double.Type, forKey key: K) throws -> Double {
@@ -551,69 +483,50 @@ extension XMLDecoder {
         func decode(_: UInt64.Type, forKey key: K) throws -> UInt64 {
             try decodeFixedWidthInteger(key: key)
         }
-    
+        
         func decode<T>(_ type: T.Type, forKey key: K) throws -> T where T: Decodable {
-            var newDecoder: XMLDecoder
-
+            let newDecoder: XMLDecoder
+            
             if type is any Collection.Type {
-                newDecoder = try decoderForArray(key)
+                newDecoder = try decoderForKeyOfCollection(key)
             } else {
                 newDecoder = try decoderForKey(key)
             }
             
             return try newDecoder.unwrap(as: type)
         }
-
-        private func decoderForArray(_ key: K) throws -> XMLDecoder {
-            var newPath = self.codingPath
-            newPath.append(key)
-
-            guard let node = node(forKey: key) as? XMLElement, let name = node.name, let parent = node.parent as? XMLElement else {
-                throw DecodingError.valueNotFound(String.self, DecodingError.Context(codingPath: self.decoder.codingPath, debugDescription: "Could not decode."))
-            }
-
-            return XMLDecoder(
-                from: parent,
-                at: newPath,
-                elementName: name,
-                namespace: self.decoder.namespace,
-                options: self.decoder.options
-            )
-        }
-
+        
         private func decoderForKey(_ key: K) throws -> XMLDecoder {
             var newPath = self.codingPath
             newPath.append(key)
-
-            guard let node = node(forKey: key) else {
-                throw DecodingError.valueNotFound(String.self, DecodingError.Context(codingPath: self.decoder.codingPath, debugDescription: "Could not decode."))
+            
+            if let element = self.elements[key.stringValue] {
+                return XMLDecoder(from: element,at: newPath,options: self.decoder.options)
             }
-
-            if node.kind == .namespace {
-                return XMLDecoder(
-                    from: self.decoder.element,
-                    at: newPath,
-                    namespace: node,
-                    options: self.decoder.options
-                )
-            } else if let element = node as? XMLElement {
-                return XMLDecoder(
-                    from: element,
-                    at: newPath,
-                    namespace: self.decoder.namespace,
-                    options: self.decoder.options
-                )
-            } else {
-                throw DecodingError.valueNotFound(String.self, DecodingError.Context(codingPath: self.decoder.codingPath, debugDescription: "Could not decode."))
+            
+            if self.namespaces.contains(key.stringValue) {
+                return XMLDecoder(from: self.decoder.element,with: key.stringValue, at: newPath,options: self.decoder.options)
             }
+            
+            throw DecodingError.keyNotFound(key, .init(
+                codingPath: self.codingPath,
+                debugDescription: "No value associated with key \(key) (\"\(key.stringValue)\")."
+            ))
+        }
+
+        private func decoderForKeyOfCollection(_ key: K) throws -> XMLDecoder {
+            var newPath = self.codingPath
+            newPath.append(key)
+            
+            return XMLDecoder(from: self.decoder.element, at: newPath,options: self.decoder.options)
         }
 
         func nestedContainer<NestedKey>(keyedBy type: NestedKey.Type, forKey key: K) throws -> KeyedDecodingContainer<NestedKey> where NestedKey : CodingKey {
-            fatalError()
+            try decoderForKey(key).container(keyedBy: type)
         }
         
         func nestedUnkeyedContainer(forKey key: K) throws -> UnkeyedDecodingContainer {
-            fatalError()
+            try decoderForKey(key).unkeyedContainer()
         }
         
         func superDecoder() throws -> Decoder {
@@ -624,18 +537,32 @@ extension XMLDecoder {
             fatalError()
         }
         
-        @inline(__always) private func decodeFixedWidthInteger<T: FixedWidthInteger>(key: Self.Key) throws -> T {
-            guard let node = node(forKey: key) else {
-                throw DecodingError.valueNotFound(String.self, DecodingError.Context(codingPath: self.decoder.codingPath, debugDescription: "Could not decode."))
+        @inline(__always) private func getValue<LocalKey: CodingKey>(forKey key: LocalKey) throws -> String {
+            if let value = attributes[key.stringValue] {
+                return value
             }
-            return try self.decoder.unwrapFixedWidthInteger(from: node, for: key, as: T.self)
+            
+            if let value = elements[key.stringValue]?.value {
+                return value
+            }
+            
+            guard let value = self.decoder.element.value else {
+                throw DecodingError.keyNotFound(key, .init(
+                    codingPath: self.codingPath,
+                    debugDescription: "No value associated with key \(key) (\"\(key.stringValue)\")."
+                ))
+            }
+            
+            return value
+        }
+        
+        @inline(__always) private func decodeFixedWidthInteger<T: FixedWidthInteger>(key: Self.Key) throws -> T {
+            let value = try getValue(forKey: key)
+            return try self.decoder.unwrapFixedWidthInteger(from: value, for: key, as: T.self)
         }
         
         @inline(__always) private func decodeFloatingPoint<T: LosslessStringConvertible & BinaryFloatingPoint>(key: K) throws -> T {
-            guard let value = node(forKey: key) else {
-                throw DecodingError.valueNotFound(String.self, DecodingError.Context(codingPath: self.decoder.codingPath, debugDescription: "Could not decode."))
-            }
-            
+            let value = try getValue(forKey: key)
             return try self.decoder.unwrapFloatingPoint(from: value, for: key, as: T.self)
         }
     }
@@ -649,7 +576,7 @@ extension XMLDecoder {
         private let decoder: XMLDecoder
         
         /// The container's filtered children nodes.
-        private var array: [XMLNode]
+        private var array: [XMLTag]
         
         /// The path of coding keys taken to get to this point in decoding.
         var codingPath: [CodingKey]
@@ -657,9 +584,9 @@ extension XMLDecoder {
         var currentIndex: Int
         
         /// Initializes `self` by referencing the given decoder and container.
-        fileprivate init(decoder: XMLDecoder, array: [XMLNode]) {
+        fileprivate init(decoder: XMLDecoder, codingPath: [CodingKey], array: [XMLTag]) {
             self.decoder = decoder
-            self.codingPath = decoder.codingPath
+            self.codingPath = codingPath
             self.currentIndex = 0
             self.array = array
         }
@@ -676,18 +603,19 @@ extension XMLDecoder {
         
         private func decodeStringAtCurrentIndex() throws -> String? {
             guard !self.isAtEnd else {
-                throw DecodingError.valueNotFound(String.self, DecodingError.Context(codingPath: self.decoder.codingPath, debugDescription: "Unkeyed container is at end."))
+                throw DecodingError.valueNotFound(String.self, .init(codingPath: self.decoder.codingPath, debugDescription: "Unkeyed container is at end."))
             }
-            return self.array[currentIndex].stringValue
+            return self.array[currentIndex].value
         }
         
         mutating func decodeNil() throws -> Bool {
-            fatalError()
+            let decoded = try self.decodeStringAtCurrentIndex()
+            return decoded == nil
         }
         
         mutating func decode(_ type: Bool.Type) throws -> Bool {
             guard let string = try self.decodeStringAtCurrentIndex(), let value = Bool(string)  else {
-                throw DecodingError.valueNotFound(type, DecodingError.Context(codingPath: self.decoder.codingPath, debugDescription: "Expected \(type) but found empty node instead."))
+                throw DecodingError.valueNotFound(type, .init(codingPath: self.decoder.codingPath, debugDescription: "Expected \(type) but found empty node instead."))
             }
             return value
         }
@@ -759,31 +687,36 @@ extension XMLDecoder {
         }
         
         mutating func nestedContainer<NestedKey>(keyedBy type: NestedKey.Type) throws -> KeyedDecodingContainer<NestedKey> where NestedKey : CodingKey {
-            fatalError()
+            let decoder = try decoderForNextElement(ofType: KeyedDecodingContainer<NestedKey>.self)
+            let container = try decoder.container(keyedBy: type)
+            
+            self.currentIndex += 1
+            return container
         }
         
         mutating func nestedUnkeyedContainer() throws -> UnkeyedDecodingContainer {
-            fatalError()
+            let decoder = try decoderForNextElement(ofType: UnkeyedDecodingContainer.self)
+            let container = try decoder.unkeyedContainer()
+            
+            self.currentIndex += 1
+            return container
         }
         
         mutating func superDecoder() throws -> Decoder {
-            fatalError()
+            let decoder = try decoderForNextElement(ofType: Decoder.self)
+            self.currentIndex += 1
+            return decoder
         }
         
         private mutating func decoderForNextElement<T>(ofType: T.Type) throws -> XMLDecoder {
-            let value = try self.getNextValue(ofType: T.self)
+            let element = try self.getNextElement(ofType: T.self)
             let newPath = self.codingPath + [_XMLKey(index: self.currentIndex)]
             
-            return XMLDecoder(
-                from: value as! XMLElement,
-                at: newPath,
-                namespace: self.decoder.namespace,
-                options: self.decoder.options
-            )
+            return XMLDecoder(from: element,at: newPath,options: self.decoder.options)
         }
         
         @inline(__always)
-        private func getNextValue<T>(ofType: T.Type) throws -> XMLNode {
+        private func getNextElement<T>(ofType: T.Type) throws -> XMLTag {
             guard !self.isAtEnd else {
                 var message = "Unkeyed container is at end."
                 if T.self == UnkeyedContainer.self {
@@ -796,27 +729,41 @@ extension XMLDecoder {
                 var path = self.codingPath
                 path.append(_XMLKey(index: self.currentIndex))
                 
-                throw DecodingError.valueNotFound(
-                    T.self,
-                    .init(codingPath: path,
-                          debugDescription: message,
-                          underlyingError: nil))
+                throw DecodingError.valueNotFound(T.self, .init(
+                    codingPath: path, debugDescription: message, underlyingError: nil)
+                )
             }
             return self.array[self.currentIndex]
         }
         
         @inline(__always) private mutating func decodeFixedWidthInteger<T: FixedWidthInteger>() throws -> T {
-            let value = try self.getNextValue(ofType: T.self)
+            let element = try self.getNextElement(ofType: T.self)
             let key = _XMLKey(index: self.currentIndex)
-            let result = try self.decoder.unwrapFixedWidthInteger(from: value, for: key, as: T.self)
+            
+            guard let number = element.value else {
+                throw DecodingError.valueNotFound(String.self, .init(
+                    codingPath: self.codingPath,
+                    debugDescription: "Could not decode \(T.self).")
+                )
+            }
+            
+            let result = try self.decoder.unwrapFixedWidthInteger(from: number, for: key, as: T.self)
             self.currentIndex += 1
             return result
         }
         
         @inline(__always) private mutating func decodeFloatingPoint<T: LosslessStringConvertible & BinaryFloatingPoint>() throws -> T {
-            let value = try self.getNextValue(ofType: T.self)
+            let element = try self.getNextElement(ofType: T.self)
             let key = _XMLKey(index: self.currentIndex)
-            let result = try self.decoder.unwrapFloatingPoint(from: value, for: key, as: T.self)
+            
+            guard let number = element.value else {
+                throw DecodingError.valueNotFound(String.self, .init(
+                    codingPath: self.codingPath,
+                    debugDescription: "Could not decode \(T.self).")
+                )
+            }
+            
+            let result = try self.decoder.unwrapFloatingPoint(from: number, for: key, as: T.self)
             self.currentIndex += 1
             return result
         }

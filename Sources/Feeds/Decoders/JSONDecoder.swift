@@ -1,7 +1,7 @@
 //
 //  JSONDecoder.swift
 //
-//  Based on decoderementation from the Swift.org open source project
+//  Based on decoder implementation from the Swift.org open source project
 //
 //  See https://swift.org/LICENSE.txt for license information
 //  See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
@@ -153,9 +153,6 @@ extension JSONDecoder: Decoder {
     
     private func unwrapDate() throws -> Date {
         switch self.options.dateDecodingStrategy {
-        case .deferredToDate:
-            return try Date(from: self)
-            
         case .secondsSince1970:
             let container = SingleValueContainer(decoder: self, codingPath: self.codingPath, json: self.json)
             let double = try container.decode(Double.self)
@@ -189,14 +186,14 @@ extension JSONDecoder: Decoder {
             
         case .custom(let closure):
             return try closure(self)
+            
+        default:
+            return try Date(from: self)
         }
     }
     
     private func unwrapData() throws -> Data {
         switch self.options.dataDecodingStrategy {
-        case .deferredToData:
-            return try Data(from: self)
-            
         case .base64:
             let container = SingleValueContainer(decoder: self, codingPath: self.codingPath, json: self.json)
             let string = try container.decode(String.self)
@@ -209,6 +206,9 @@ extension JSONDecoder: Decoder {
             
         case .custom(let closure):
             return try closure(self)
+            
+        default:
+            return try Data(from: self)
         }
     }
     
@@ -479,8 +479,6 @@ extension JSONDecoder {
             self.codingPath = codingPath
             
             switch decoder.options.keyDecodingStrategy {
-            case .useDefaultKeys:
-                self.dictionary = dictionary
             case .convertFromSnakeCase:
                 // Convert the snake case keys in the container to camel case.
                 // If we hit a duplicate key after conversion, then we'll use the first one we saw.
@@ -500,6 +498,8 @@ extension JSONDecoder {
                     converted[converter(pathForKey).stringValue] = value
                 }
                 self.dictionary = converted
+            default:
+                self.dictionary = dictionary
             }
         }
         
