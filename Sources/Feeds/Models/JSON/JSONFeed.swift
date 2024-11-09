@@ -23,8 +23,9 @@
 //
 
 import Foundation
+import _FoundationEssentials
 
-/// The JSON Feed format is a pragmatic syndication format, like RSS and Atom, 
+/// The JSON Feed format is a pragmatic syndication format, like RSS and Atom,
 /// but with one big difference: it's JSON instead of XML.
 /// See https://jsonfeed.org/version/1
 public struct JSONFeed: Feed {
@@ -109,11 +110,10 @@ public struct JSONFeed: Feed {
     ///
     /// - Parameter data: XML or JSON data
     public init(data: Data) throws {
-        var parser = JSONParser(bytes: Array(data))
-        var decoderOptions = DecoderOptions()
-        decoderOptions.dateDecodingStrategy = .iso8601
-        let decoder = try JSONDecoder(from: parser.parse(), options: decoderOptions)
-        try self.init(from: decoder)
+        let decoder = _FoundationEssentials.JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoderImpl = try decoder.getDecoderImpl(from: data)
+        try self.init(from: decoderImpl)
     }
 }
 

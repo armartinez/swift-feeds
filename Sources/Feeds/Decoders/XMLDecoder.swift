@@ -5,6 +5,9 @@
 //
 
 import Foundation
+import _FoundationEssentials
+
+typealias Options = _FoundationEssentials.JSONDecoder.Options
 
 fileprivate struct _XMLKey: CodingKey {
     var stringValue: String
@@ -34,7 +37,7 @@ struct XMLDecoder {
     fileprivate let namespace: String?
     
     /// Options set on the top-level decoder.
-    fileprivate let options: DecoderOptions
+    fileprivate let options: Options
     
     /// The path to the current point in encoding.
     fileprivate(set) public var codingPath: [CodingKey]
@@ -43,7 +46,7 @@ struct XMLDecoder {
     public var userInfo: [CodingUserInfoKey : Any]
     
     /// Initializes `self` with the given top-level container and options.
-    init(from element: XMLTag, with namespace: String? = nil, at codingPath: [CodingKey] = [], options: DecoderOptions) {
+    init(from element: XMLTag, with namespace: String? = nil, at codingPath: [CodingKey] = [], options: Options) {
         self.element = element
         self.namespace = namespace
         self.codingPath = codingPath
@@ -70,18 +73,29 @@ extension XMLDecoder: Decoder {
         }
         
         guard let array = array else {
-            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
+            throw DecodingError.valueNotFound(Date.self, .init(
+                codingPath: self.codingPath,
+                debugDescription: "Cannot get unkeyed decoding container -- found null value instead"
+            ))
         }
         
         return UnkeyedContainer(decoder: self, codingPath: self.codingPath, array: array)
     }
     
     @usableFromInline func singleValueContainer() throws -> SingleValueDecodingContainer {
-        guard let value = element.value else {
-            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
+        return self
+    }
+    
+    @inline(__always)
+    func checkNotNull(for codingKey: [CodingKey]) throws -> String  {
+        if let value = self.element.value {
+           return value
         }
         
-        return SingleValueContainer(decoder: self, codingPath: codingPath, stringValue: value)
+        throw DecodingError.valueNotFound(String.self, .init(
+            codingPath: codingKey,
+            debugDescription: "Found null value"
+        ))
     }
     
     func unwrap<T: Decodable>(as type: T.Type) throws -> T {
@@ -102,51 +116,39 @@ extension XMLDecoder: Decoder {
     }
     
     private func unwrapDate() throws -> Date {
-        guard let value = self.element.value else {
-            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
-        }
+        let value = try checkNotNull(for: self.codingPath)
         
         switch options.dateDecodingStrategy {
         case .secondsSince1970:
-            let container = SingleValueContainer(decoder: self, codingPath: self.codingPath, stringValue: value)
-            let double = try container.decode(Double.self)
+            let double = try self.decode(Double.self)
             return Date(timeIntervalSince1970: double)
         case .millisecondsSince1970:
-            let container = SingleValueContainer(decoder: self, codingPath: self.codingPath, stringValue: value)
-            let double = try container.decode(Double.self)
+            let double = try self.decode(Double.self)
             return Date(timeIntervalSince1970: double / 1000.0)
         case .iso8601:
             if #available(macOS 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *) {
-                let container = SingleValueContainer(decoder: self, codingPath: self.codingPath, stringValue: value)
-                let string = try container.decode(String.self)
+                let string = try self.decode(String.self)
                 guard let date = ISO8601DateFormatter().date(from: string) else {
                     throw DecodingError.dataCorrupted(.init(codingPath: self.codingPath, debugDescription: "Expected date string to be ISO8601-formatted."))
                 }
                 return date
             } else {
                 fatalError("ISO8601DateFormatter is unavailable on this platform.")
-            }        case .formatted(let customDateFormatter):
-            guard let value = customDateFormatter.date(from: value) else {
-                throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
             }
-            return value
         case .custom(let closure):
             return try closure(self)
         default:
             return try Date(from: self)
         }
-        
     }
     
     private func unwrapData() throws -> Data {
-        guard let value = self.element.value else {
-            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Date.self)."))
-        }
+        let value = try checkNotNull(for: self.codingPath)
         
         switch options.dataDecodingStrategy {
         case .base64:
-            guard let value = Data(base64Encoded: value) else {
-                throw DecodingError.valueNotFound(Data.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(Data.self)."))
+            guard let value = Data(base64Encoded: value, options: .ignoreUnknownCharacters) else {
+                throw DecodingError.dataCorrupted(.init(codingPath: self.codingPath, debugDescription: "Could not decode \(Data.self)."))
             }
             return value
         case .custom(let closure):
@@ -157,22 +159,22 @@ extension XMLDecoder: Decoder {
     }
     
     private func unwrapURL() throws -> URL {
-        guard let value = self.element.value, let url = URL(string: value) else {
-            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(URL.self)."))
+        let value = try checkNotNull(for: self.codingPath)
+        
+        guard let url = URL(string: value) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: self.codingPath, debugDescription: "Could not decode \(URL.self)."))
         }
         
         return url
     }
     
-    private func unwrapDecimal() throws -> Decimal {
-        guard let numberString = self.element.value else {
-            throw DecodingError.valueNotFound(Date.self, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(URL.self)."))
-        }
+    private func unwrapDecimal() throws -> Foundation.Decimal {
+        let value = try checkNotNull(for: self.codingPath)
         
-        guard let decimal = Decimal(string: numberString) else {
+        guard let decimal = Foundation.Decimal(string: value) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: self.codingPath,
-                debugDescription: "Parsed JSON number <\(numberString)> does not fit in \(Decimal.self)."))
+                debugDescription: "Parsed number <\(value)> does not fit in \(Decimal.self)."))
         }
         
         return decimal
@@ -190,7 +192,7 @@ extension XMLDecoder: Decoder {
             }
             throw DecodingError.dataCorrupted(.init(
                 codingPath: path,
-                debugDescription: "Parsed JSON number <\(number)> does not fit in \(T.self)."))
+                debugDescription: "Parsed number <\(number)> does not fit in \(T.self)."))
         }
         
         var path = self.codingPath
@@ -206,8 +208,8 @@ extension XMLDecoder: Decoder {
         for additionalKey: CodingKey? = nil,
         as type: T.Type
     ) throws -> T {
-        guard !number.isEmpty else {
-            throw DecodingError.valueNotFound(type, .init(codingPath: self.codingPath, debugDescription: "Empty string"))
+        if number.isEmpty {
+            throw DecodingError.valueNotFound(type, .init(codingPath: self.codingPath, debugDescription: "Found empty string"))
         }
         
         // this is the fast pass. Number directly convertible to Integer
@@ -255,115 +257,94 @@ extension XMLDecoder: Decoder {
             path.append(additionalKey)
         }
         
-        throw DecodingError.valueNotFound(type, .init(codingPath: self.codingPath, debugDescription: "Could not decode \(type)."))
+        throw DecodingError.dataCorrupted(.init(codingPath: self.codingPath, debugDescription: "Could not decode \(type)."))
     }
 }
 
 // MARK: Single Value Container
 
-extension XMLDecoder {
-    struct SingleValueContainer: SingleValueDecodingContainer {
-        let decoder: XMLDecoder
-        let stringValue: String?
-        let codingPath: [CodingKey]
-        
-        init(decoder: XMLDecoder, codingPath: [CodingKey], stringValue: String?) {
-            self.decoder = decoder
-            self.codingPath = codingPath
-            self.stringValue = stringValue
+extension XMLDecoder: SingleValueDecodingContainer {
+    func decodeNil() -> Bool {
+        self.element.value == nil
+    }
+    
+    func decode(_ type: Bool.Type) throws -> Bool {
+        let value = try checkNotNull(for: self.codingPath)
+                
+        guard let result = Bool(value) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: self.codingPath,
+                debugDescription: "Could not decode \(Bool.self).")
+            )
         }
         
-        func decodeNil() -> Bool {
-            self.stringValue == nil
-        }
-        
-        func decode(_ type: Bool.Type) throws -> Bool {
-            guard let string = stringValue, let result = Bool(string) else {
-                throw DecodingError.valueNotFound(String.self, .init(
-                    codingPath: self.codingPath,
-                    debugDescription: "Could not decode \(String.self).")
-                )
-            }
-            
-            return result
-        }
-        
-        func decode(_ type: String.Type) throws -> String {
-            guard let string = stringValue else {
-                throw DecodingError.valueNotFound(String.self, .init(
-                    codingPath: self.codingPath,
-                    debugDescription: "Could not decode \(String.self).")
-                )
-            }
-            
-            return string
-        }
-        
-        func decode(_ type: Double.Type) throws -> Double {
-            return try decodeFloatingPoint()
-        }
-        
-        func decode(_ type: Float.Type) throws -> Float {
-            return try decodeFloatingPoint()
-        }
-        
-        func decode(_ type: Int.Type) throws -> Int {
-            return try decodeFixedWidthInteger()
-        }
-        
-        func decode(_ type: Int8.Type) throws -> Int8 {
-            return try decodeFixedWidthInteger()
-        }
-        
-        func decode(_ type: Int16.Type) throws -> Int16 {
-            return try decodeFixedWidthInteger()
-        }
-        
-        func decode(_ type: Int32.Type) throws -> Int32 {
-            return try decodeFixedWidthInteger()
-        }
-        
-        func decode(_ type: Int64.Type) throws -> Int64 {
-            return try decodeFixedWidthInteger()
-        }
-        
-        func decode(_ type: UInt.Type) throws -> UInt {
-            return try decodeFixedWidthInteger()
-        }
-        
-        func decode(_ type: UInt8.Type) throws -> UInt8 {
-            return try decodeFixedWidthInteger()
-        }
-        
-        func decode(_ type: UInt16.Type) throws -> UInt16 {
-            return try decodeFixedWidthInteger()
-        }
-        
-        func decode(_ type: UInt32.Type) throws -> UInt32 {
-            return try decodeFixedWidthInteger()
-        }
-        
-        func decode(_ type: UInt64.Type) throws -> UInt64 {
-            return try decodeFixedWidthInteger()
-        }
-        
-        func decode<T>(_ type: T.Type) throws -> T where T : Decodable {
-            try self.decoder.unwrap(as: type)
-        }
-        
-        @inline(__always) private func decodeFixedWidthInteger<T: FixedWidthInteger>() throws -> T {
-            guard let value = self.stringValue else {
-                throw DecodingError.valueNotFound(String.self, .init(codingPath: self.decoder.codingPath, debugDescription: "Could not decode."))
-            }
-            return try self.decoder.unwrapFixedWidthInteger(from: value, as: T.self)
-        }
-        
-        @inline(__always) private func decodeFloatingPoint<T: LosslessStringConvertible & BinaryFloatingPoint>() throws -> T {
-            guard let value = self.stringValue else {
-                throw DecodingError.valueNotFound(String.self, .init(codingPath: self.decoder.codingPath, debugDescription: "Could not decode."))
-            }
-            return try self.decoder.unwrapFloatingPoint(from: value, as: T.self)
-        }
+        return result
+    }
+    
+    func decode(_ type: String.Type) throws -> String {
+        return try checkNotNull(for: self.codingPath)
+    }
+    
+    func decode(_ type: Double.Type) throws -> Double {
+        return try decodeFloatingPoint()
+    }
+    
+    func decode(_ type: Float.Type) throws -> Float {
+        return try decodeFloatingPoint()
+    }
+    
+    func decode(_ type: Int.Type) throws -> Int {
+        return try decodeFixedWidthInteger()
+    }
+    
+    func decode(_ type: Int8.Type) throws -> Int8 {
+        return try decodeFixedWidthInteger()
+    }
+    
+    func decode(_ type: Int16.Type) throws -> Int16 {
+        return try decodeFixedWidthInteger()
+    }
+    
+    func decode(_ type: Int32.Type) throws -> Int32 {
+        return try decodeFixedWidthInteger()
+    }
+    
+    func decode(_ type: Int64.Type) throws -> Int64 {
+        return try decodeFixedWidthInteger()
+    }
+    
+    func decode(_ type: UInt.Type) throws -> UInt {
+        return try decodeFixedWidthInteger()
+    }
+    
+    func decode(_ type: UInt8.Type) throws -> UInt8 {
+        return try decodeFixedWidthInteger()
+    }
+    
+    func decode(_ type: UInt16.Type) throws -> UInt16 {
+        return try decodeFixedWidthInteger()
+    }
+    
+    func decode(_ type: UInt32.Type) throws -> UInt32 {
+        return try decodeFixedWidthInteger()
+    }
+    
+    func decode(_ type: UInt64.Type) throws -> UInt64 {
+        return try decodeFixedWidthInteger()
+    }
+    
+    func decode<T>(_ type: T.Type) throws -> T where T : Decodable {
+        try self.unwrap(as: type)
+    }
+    
+    @inline(__always) private func decodeFixedWidthInteger<T: FixedWidthInteger>() throws -> T {
+        let value = try checkNotNull(for: self.codingPath)
+        return try self.unwrapFixedWidthInteger(from: value, as: T.self)
+    }
+    
+    @inline(__always) private func decodeFloatingPoint<T: LosslessStringConvertible & BinaryFloatingPoint>() throws -> T {
+        let value = try checkNotNull(for: self.codingPath)
+        return try self.unwrapFloatingPoint(from: value, as: T.self)
     }
 }
 
@@ -387,7 +368,7 @@ extension XMLDecoder {
         private(set) public var codingPath: [CodingKey]
         
         // MARK: - Initialization
-
+        
         /// Initializes `self` with the given references.
         fileprivate init(decoder: XMLDecoder, codingPath: [CodingKey], element: XMLTag, namespace: String? = nil) {
             self.decoder = decoder
@@ -412,9 +393,9 @@ extension XMLDecoder {
         
         func contains(_ key: K) -> Bool {
             return self.elements[key.stringValue] != nil ||
-                   self.attributes[key.stringValue] != nil ||
-                   self.namespaces.contains(key.stringValue) ||
-                   self.decoder.element.name == key.stringValue
+            self.attributes[key.stringValue] != nil ||
+            self.namespaces.contains(key.stringValue) ||
+            self.decoder.element.name == key.stringValue
         }
         
         func decodeNil(forKey key: K) throws -> Bool {
@@ -426,7 +407,10 @@ extension XMLDecoder {
             let value = try getValue(forKey: key)
             
             guard let bool = Bool(value) else {
-                throw DecodingError.valueNotFound(type, .init(codingPath: self.decoder.codingPath, debugDescription: "No value associated with key \(key.stringValue)."))
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: self.decoder.codingPath,
+                    debugDescription: "Could not decode \(Bool.self)."
+                ))
             }
             
             return bool
@@ -508,19 +492,19 @@ extension XMLDecoder {
                 return XMLDecoder(from: self.decoder.element,with: key.stringValue, at: newPath,options: self.decoder.options)
             }
             
-            throw DecodingError.keyNotFound(key, .init(
+            throw DecodingError.dataCorrupted(.init(
                 codingPath: self.codingPath,
-                debugDescription: "No value associated with key \(key) (\"\(key.stringValue)\")."
+                debugDescription: "Can't create decoder with value associated with key \(key) (\"\(key.stringValue)\")."
             ))
         }
-
+        
         private func decoderForKeyOfCollection(_ key: K) throws -> XMLDecoder {
             var newPath = self.codingPath
             newPath.append(key)
             
             return XMLDecoder(from: self.decoder.element, at: newPath,options: self.decoder.options)
         }
-
+        
         func nestedContainer<NestedKey>(keyedBy type: NestedKey.Type, forKey key: K) throws -> KeyedDecodingContainer<NestedKey> where NestedKey : CodingKey {
             try decoderForKey(key).container(keyedBy: type)
         }

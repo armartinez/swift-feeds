@@ -81,14 +81,13 @@ class DublinCoreTests: BaseTestCase {
     func testRssDublinCoreParsingPerformance() {
         
         self.measure {
-            
             // Given
             let expectation = self.expectation(description: "Dublin Core Parsing Performance")
             let URL = self.fileURL("RSSDC", withExtension: "xml")
   
             // When
             Task {
-                _ = await try RSSFeed(URL: URL)
+                _ = try await RSSFeed(URL: URL)
                 
                 // Then
                 expectation.fulfill()

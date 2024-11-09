@@ -26,7 +26,7 @@ import Foundation
 
 /// Converts date and time textual representations within the RFC3339
 /// date specification into `Date` objects
-class RFC3339DateFormatter: DateFormatter {
+class RFC3339DateFormatter: DateFormatter, @unchecked Sendable {
     
     let dateFormats = [
         "yyyy-MM-dd'T'HH:mm:ssZZZZZ",
