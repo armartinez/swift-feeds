@@ -33,9 +33,9 @@ extension String {
     /// - Returns: A `Date` object, or nil if the conversion failed.
     func toDate(from spec: DateSpec) -> Date? {
         switch spec {
-        case .rfc822:   return RFC822DateFormatter().date(from: self)
-        case .rfc3999:  return RFC3339DateFormatter().date(from: self)
-        case .iso8601:  return ISO8601DateFormatter().date(from: self)
+        case .rfc822: return RFC822DateFormatter().date(from: self)
+        case .rfc3999: return RFC3339DateFormatter().date(from: self)
+        case .iso8601: return getISO8601Date()
         }
     }
     
@@ -49,4 +49,19 @@ extension String {
             ISO8601DateFormatter().date(from: self))
     }
     
+    private func getISO8601Date() -> Date? {
+        let formatter = ISO8601DateFormatter()
+        
+        formatter.formatOptions =  [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: self)  {
+            return date
+        }
+        
+        formatter.formatOptions =  [.withFractionalSeconds]
+        if let date = formatter.date(from: self)  {
+            return date
+        }
+        
+        return nil
+    }
 }

@@ -1,6 +1,11 @@
-// swift-tools-version:5.5
+// swift-tools-version:5.9
 
 import PackageDescription
+
+let wasiLibcCSettings: [CSetting] = [
+    .define("_WASI_EMULATED_SIGNAL", .when(platforms: [.wasi])),
+    .define("_WASI_EMULATED_MMAN", .when(platforms: [.wasi])),
+]
 
 let package = Package(
     name: "swift-feeds",
@@ -19,8 +24,25 @@ let package = Package(
     targets: [
         .target(
             name: "Feeds",
-            dependencies: []
+            dependencies: [
+                "_FoundationCShims",
+                "_FoundationEssentials"
+            ]
         ),
+        // _FoundationCShims (Internal)
+        .target(
+            name: "_FoundationCShims",
+            cSettings: [
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows]))
+            ] + wasiLibcCSettings
+        ),
+        // _FoundationEssentials
+        .target(
+            name: "_FoundationEssentials",
+            dependencies: [
+            "_FoundationCShims"
+            ]
+          ),
         .testTarget(
             name: "FeedsTests",
             dependencies: ["Feeds"],

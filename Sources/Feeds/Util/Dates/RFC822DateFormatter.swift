@@ -26,7 +26,7 @@ import Foundation
 
 /// Converts date and time textual representations within the RFC822
 /// date specification into `Date` objects
-class RFC822DateFormatter: DateFormatter {
+class RFC822DateFormatter: DateFormatter, @unchecked Sendable {
     
     let dateFormats = [
         "EEE, d MMM yyyy HH:mm:ss zzz",

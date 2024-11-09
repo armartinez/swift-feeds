@@ -170,10 +170,9 @@ public struct AtomFeed : Feed {
     /// - Parameter data: XML or JSON data
     public init(data: Data) throws {
         let xml = try XMLReader().read(with: data)
-        var decoderOptions = DecoderOptions()
-        decoderOptions.dateDecodingStrategy = .iso8601
-        
-        let decoder = XMLDecoder(from: xml, options: decoderOptions)
+        var options = Options()
+        options.dateDecodingStrategy = .iso8601
+        let decoder = XMLDecoder(from: xml, options: options)
         try self.init(from: decoder)
     }
 }
