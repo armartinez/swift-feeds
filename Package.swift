@@ -49,7 +49,7 @@ let package = Package(
             resources: [.process("json"), .process("xml")]
         )
     ],
-    swiftLanguageVersions: [
+    swiftLanguageModes: [
         .v5
     ]
 )
