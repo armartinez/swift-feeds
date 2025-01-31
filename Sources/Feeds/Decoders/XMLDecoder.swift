@@ -116,8 +116,6 @@ extension XMLDecoder: Decoder {
     }
     
     private func unwrapDate() throws -> Date {
-        let value = try checkNotNull(for: self.codingPath)
-        
         switch options.dateDecodingStrategy {
         case .secondsSince1970:
             let double = try self.decode(Double.self)

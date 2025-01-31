@@ -55,7 +55,8 @@ extension WeekDay {
     ///
     /// - Parameter rawValue: The raw value
     public init?(rawValue: String) {
-        switch rawValue.lowercased() {
+        let trimmedRawValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch trimmedRawValue.lowercased() {
         case "monday":     self = .monday
         case "tuesday":    self = .tuesday
         case "wednesday":  self = .wednesday

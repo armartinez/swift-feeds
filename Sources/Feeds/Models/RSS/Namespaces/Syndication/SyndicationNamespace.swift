@@ -87,8 +87,9 @@ extension SyndicationNamespace: Codable {
     
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let frequency = try container.decodeIfPresent(String.self, forKey: .updateFrequency)
         updatePeriod = try container.decodeIfPresent(SyndicationUpdatePeriod.self, forKey: .updatePeriod)
-        updateFrequency = try container.decodeIfPresent(Int.self, forKey: .updateFrequency)
+        updateFrequency = Int(frequency?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
         updateBase = try container.decodeIfPresent(String.self, forKey: .updateBase)?.toDate(from: .iso8601)
     }
 }

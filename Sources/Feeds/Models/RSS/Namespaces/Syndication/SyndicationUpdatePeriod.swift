@@ -56,7 +56,8 @@ extension SyndicationUpdatePeriod {
     ///
     /// - Parameter rawValue: The raw value.
     public init?(rawValue: String) {
-        switch rawValue.lowercased() {
+        let trimmedRawValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch trimmedRawValue {
         case "hourly":  self = .hourly
         case "daily":   self = .daily
         case "weekly":  self = .weekly
