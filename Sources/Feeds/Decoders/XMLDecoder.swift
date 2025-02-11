@@ -398,7 +398,10 @@ extension XMLDecoder {
         
         func decodeNil(forKey key: K) throws -> Bool {
             let value = try getValue(forKey: key)
-            return value == ""
+            if value.isEmpty, self.elements[key.stringValue]?.children?.isEmpty ?? true {
+                return true
+            }   
+            return false
         }
         
         func decode(_ type: Bool.Type, forKey key: K) throws -> Bool {
@@ -528,14 +531,7 @@ extension XMLDecoder {
                 return value
             }
             
-            guard let value = self.decoder.element.value else {
-                throw DecodingError.keyNotFound(key, .init(
-                    codingPath: self.codingPath,
-                    debugDescription: "No value associated with key \(key) (\"\(key.stringValue)\")."
-                ))
-            }
-            
-            return value
+            return self.decoder.element.value ?? ""
         }
         
         @inline(__always) private func decodeFixedWidthInteger<T: FixedWidthInteger>(key: Self.Key) throws -> T {
