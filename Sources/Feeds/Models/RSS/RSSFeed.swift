@@ -47,7 +47,6 @@ extension RSSFeed: Codable {
     
     enum CodingKeys: String, CodingKey {
         case channel
-        case item
     }
     
     public func encode(to encoder: Encoder) throws {
